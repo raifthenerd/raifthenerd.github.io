@@ -1,0 +1,69 @@
+@charset "utf-8";
+
+
+@import url('https://fonts.googleapis.com/css2?family=Gothic+A1:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap');
+$family-sans-serif: 'Inter', 'Gothic A1', sans-serif;
+$family-monospace: 'JetBrains Mono', monospace;
+
+
+// solarized light
+$base03:    #002b36
+$base02:    #073642
+$base01:    #586e75
+$base00:    #657b83
+$base0:     #839496
+$base1:     #93a1a1
+$base2:     #eee8d5
+$base3:     #fdf6e3
+$yellow:    #b58900
+$orange:    #cb4b16
+$red:       #dc322f
+$magenta:   #d33682
+$violet:    #6c71c4
+$blue:      #268bd2
+$cyan:      #2aa198
+$green:     #859900
+
+
+$grey-darker: $base03
+$grey-dark: $base02
+$grey: $base01
+$grey-light: $base00
+$grey-lighter: $base0
+$grey-lightest: $base1
+
+$primary: $blue
+
+$code: $grey-light
+$code-background: $base3
+
+$link: $magenta
+$link-hover: $blue
+$link-visited: $grey-lightest
+
+
+$footer-padding: 1.0rem 1.5rem 1.5rem
+
+
+@import ../../node_modules/bulma/sass/base/_all.sass
+@import ../../node_modules/bulma/sass/utilities/_all.sass
+@import ../../node_modules/bulma/sass/helpers/_all.sass
+
+@import ../../node_modules/bulma/sass/elements/container.sass
+@import ../../node_modules/bulma/sass/elements/content.sass
+@import ../../node_modules/bulma/sass/elements/title.sass
+@import ../../node_modules/bulma/sass/elements/image.sass
+
+@import ../../node_modules/bulma/sass/components/navbar.sass
+@import ../../node_modules/bulma/sass/components/menu.sass
+
+@import ../../node_modules/bulma/sass/layout/section.sass
+@import ../../node_modules/bulma/sass/layout/footer.sass
+@import ../../node_modules/bulma/sass/layout/hero.sass
+
+
+// sticky footer
+html,body
+  min-height: 100vh
+  display: flex
+  flex-direction: column

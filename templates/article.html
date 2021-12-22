@@ -1,0 +1,26 @@
+{% extends "index.html" %}
+
+{% block comment %}
+<script src="https://giscus.app/client.js" data-repo="raifthenerd/raifthenerd.github.io" data-repo-id="R_kgDOGkX-xw"
+    data-category="General" data-category-id="DIC_kwDOGkX-x84CAY8r" data-mapping="pathname" data-reactions-enabled="1"
+    data-emit-metadata="0" data-theme="light" data-lang="en" crossorigin="anonymous" async>
+    </script>
+{% endblock comment %}
+
+{% block content %}
+<section class="section">
+    <article class="container is-max-desktop">
+        <header>
+            <h1 class="title is-2">{{ page.title }}</h1>
+            <p class="subtitle is-6">
+                <time datetime="{{ page.date }}">{{ page.date }}</time>
+            </p>
+            <hr>
+        </header>
+        <div class="content">
+            {{ page.content | safe }}
+        </div>
+        <article class="giscus"></article>
+    </article>
+</section>
+{% endblock content %}

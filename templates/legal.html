@@ -1,0 +1,15 @@
+{% extends "index.html" %}
+
+{% block content %}
+<section class="section">
+    <article class="container is-max-desktop">
+        <header>
+            <h1 class="title is-2">{{ section.title }}</h1>
+            <hr>
+        </header>
+        <div class="content">
+            {{ section.content | safe }}
+        </div>
+    </article>
+</section>
+{% endblock content %}

@@ -1,0 +1,30 @@
+{% extends "index.html" %}
+
+{% block metadata %}
+<title>404 Not Found</title>
+{% endblock metadata %}
+
+{% block body %}
+<div class="hero is-primary is-fullheight">
+    <navbar class="navbar is-transparent" role="navigation" aria-label="main navigation">
+        <div class="navbar-brand container">
+            <div class="navbar-brand">
+                <a class="navbar-item has-text-weight-bold is-uppercase" href="{{ config.base_url }}">
+                    Back to main page
+                </a>
+            </div>
+        </div>
+    </navbar>
+    <div class="hero-body">
+        <div class="container">
+            <img src="/nyan-cat.gif">
+            <div class="title is-1 is-uppercase">
+                Er... Please go back :(
+            </div>
+            <div class="subtitle is-5 is-uppercase">
+                404 Not Found
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock body %}

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="{{ lang | default(value=config.default_language) }}">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    {% block favicon %}
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" type="image/png" href="/favicon.png">
+    {% endblock %}
+
+    {% block style %}
+    <link rel="stylesheet" href="/css/syntax.css">
+    <link rel="stylesheet" href="/css/default.css">
+    {% block math %}
+    <link rel="stylesheet" href="/css/katex.min.css">
+    <script defer src="/js/katex.min.js"></script>
+    <script defer src="/js/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+    {% endblock %}
+    {% endblock %}
+    {% if config.mode == "build" %}
+        {% block comment %}
+        {% endblock %}
+        {% block analytics %}
+        <script async src="https://www.googletagmanager.com/gtag/js?id={{config.extra.google_analytics}}"></script>
+        <script>
+            window.dataLayer = window.dataLayer || [];
+            function gtag() { dataLayer.push(arguments); }
+            gtag('js', new Date());
+
+            gtag('config', '{{config.extra.google_analytics}}');
+        </script>
+        {% endblock %}
+    {% endif %}
+
+    {% block feed %}
+    <link rel="alternate" href="{{ get_url(path="atom.xml", trailing_slash=false) }}" type="application/atom+xml" title="Feeds">
+    {% endblock %}
+
+    {% block metadata %}
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ current_url }}">
+    <meta property="og:site_name" content="{{ config.title }}">
+    <meta name="twitter:card" content="summary">
+
+    {% if page.title %}
+        {% set title = page.title ~ ' ― ' ~ config.title %}
+    {% elif section.title %}
+        {% set title = section.title ~ ' ― ' ~ config.title %}
+    {% else %}
+        {% set title = config.title ~ ' ― ' ~ config.description %}
+    {% endif %}
+    <title>{{title}}</title>
+    <meta property="og:title" content="{{ title }}">
+    <meta name="twitter:title" content="{{ title }}">
+
+    {% set description = page.description | default(value=section.description | default(value=config.description)) %}
+    <meta name="description" content="{{ description }}">
+    <meta property="og:description" content="{{ description }}">
+    <meta name="twitter:description" content="{{ description }}">
+
+    {% set_global thumbnail = '/thumbnail.png' %}
+    {% for asset in page.assets | default(value=section.assets | default(value=[])) %}
+        {% if asset is matching('/thumbnail[.](jpg|png)$') %}
+            {% set_global thumbnail = asset %}
+        {% endif %}
+    {% endfor %}
+    {% set thumbnail_url = get_url(path=thumbnail, trailing_slash=false) %}
+    <meta name="twitter:image" content="{{ thumbnail_url }}">
+    <meta property="og:image" content="{{ thumbnail_url }}">
+    {% endblock %}
+</head>
+
+<body>
+    {% block body %}
+
+    {% block navbar %}
+    <header class="navbar is-transparent" role="navigation" aria-label="main navigation">
+        <div class="navbar-brand container is-max-desktop">
+            <div class="navbar-brand">
+                <a class="navbar-item has-text-weight-bold is-uppercase" href="{{ config.base_url }}">
+                    {{ config.title }}
+                </a>
+            </div>
+        </div>
+    </header>
+    {% endblock %}
+
+    {% block content %}
+    <section class="section">
+        <div class="container is-max-desktop">
+            {% for page in paginator.pages %}
+                <article>
+                    <header class="pb-5">
+                        <p class="subtitle is-5">
+                            <time datetime="{{ page.date }}">{{ page.date }}</time>
+                        </p>
+                        <h1 class="title is-1">
+                            <a href="{{ page.permalink | safe }}">
+                                {{ page.title }}
+                            </a>
+                        </h1>
+                    </header>
+                    <div class="content">
+                        {{ page.summary | safe }}
+                    </div>
+                </article>
+                <hr>
+            {% endfor %}
+            <nav class="subtitle is-3">
+                {% if paginator.number_pagers > 1 %}
+                    {% if paginator.previous %}
+                        <a href="{{ paginator.previous }}" rel="prev">&lt;---&nbsp;</a>
+                        <a href="{{ paginator.first }}" rel="nofollow">1</a>
+                    {% endif %}
+
+                    {% for delta in range(start=1, end=3) | reverse %}
+                        {% set idx = paginator.current_index - delta %}
+                        {% if delta == 2 and idx > 2 %}
+                            ...
+                        {% endif %}
+                        {% if idx > 1 %}
+                            <a href="{{ paginator.base_url ~ idx }}" rel="nofollow">
+                                {{ idx }}
+                            </a>
+                        {% endif %}
+                    {% endfor %}
+
+                    {{ paginator.current_index }}
+
+                    {% for delta in range(start=1, end=3) %}
+                        {% set idx = paginator.current_index + delta %}
+                        {% if idx < paginator.number_pagers %}
+                            <a href="{{ paginator.base_url ~ idx }}" rel="nofollow">
+                                {{ idx }}
+                            </a>
+                        {% endif %}
+                        {% if delta == 2 and idx + 1 < paginator.number_pagers %}
+                            ...
+                        {% endif %}
+                    {% endfor %}
+                    {% if paginator.next %}
+                        <a href="{{ paginator.last }}" rel="nofollow">{{ paginator.number_pagers }}</a>
+                        <a href="{{ paginator.next }}" rel="next">&nbsp;---&gt;</a>
+                    {% endif %}
+                {% endif %}
+            </nav>
+        </div>
+    </section>
+    {% endblock %}
+
+    {% block footer %}
+    <footer class="footer mt-auto">
+        <div class="container is-max-desktop">
+            <div class="image is-96x96 ml-auto mr-auto">
+                <img src='/nyan.svg' alt="ascii kitten">
+            </div>
+            <div class="has-text-centered is-size-7">
+                <small>
+                    &copy; <a href="https://github.com/{{ config.extra.github }}/{{ config.extra.github }}"
+                        rel="author external">{{ config.extra.author }}</a> 2022.
+                    All contents on this website is licensed under <a
+                        href="https://creativecommons.org/licenses/by-sa/4.0/" rel="license external">CC BY-SA 4.0</a>.
+                    <br>
+                    <a href="/policy" rel="license">Privacy Policy</a>
+                </small>
+            </div>
+        </div>
+    </footer>
+    {% endblock %}
+
+    {% endblock %}
+</body>
+
+</html>
