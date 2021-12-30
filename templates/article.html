@@ -9,18 +9,39 @@
 
 {% block content %}
 <section class="section">
-    <article class="container is-max-desktop">
-        <header>
-            <h1 class="title is-2">{{ page.title }}</h1>
-            <p class="subtitle is-6">
-                <time datetime="{{ page.date }}">{{ page.date }}</time>
-            </p>
-            <hr>
-        </header>
-        <div class="content">
-            {{ page.content | safe }}
+    <article class="container is-max-widescreen">
+        <div class="columns is-multiline is-variable is-8-widescreen">
+            <header class="column is-full">
+                <h1 class="title is-2">{{ page.title }}</h1>
+                <p class="subtitle is-6">
+                    <time datetime="{{ page.date }}">{{ page.date }}</time>
+                </p>
+                <hr>
+            </header>
+            {% if page.toc %}
+                <aside class="menu column is-one-quarter is-one-third-widescreen is-hidden-mobile">
+                    <p class="menu-label title">Table of Contents</p>
+                    <ul class="menu-list">
+                        {% for heading in page.toc %}
+                            <li>
+                                <a href="{{ heading.permalink | safe }}">{{ heading.title }}</a>
+                                {% if heading.children %}
+                                <ul>
+                                    {% for subheading in heading.children %}
+                                    <li><a href="{{ subheading.permalink | safe }}">{{ subheading.title }}</a></li>
+                                    {% endfor %}
+                                </ul>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </aside>
+            {% endif %}
+            <div class="content column">
+                {{ page.content | safe }}
+            </div>
+            <article class="giscus column is-full"></article>
         </div>
-        <article class="giscus"></article>
     </article>
 </section>
 {% endblock content %}

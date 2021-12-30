@@ -4,10 +4,10 @@ description = 'Explains how we collect, use, and disclose your information when 
 template = 'legal.html'
 +++
 
-*Last updated on <time datetime="2021-12-30">2021-12-30</time>.*
+*Last updated on {{date(year=2021, month=12, day=30)}}.*
 
 [.SH](/) ("we" or "us" or "our") respects the privacy of our users ("user" or "you"). This Privacy Policy explains how
-we collect, use, and disclose your information when you visit our website [https://blog.raifthenerd.com](/) (the
+we collect, use, and disclose your information when you visit our website {{ website() }} (the
 "Site"). Please read this privacy policy carefully. If you do not agree with the terms of this privacy policy, please
 do not access the site.
 

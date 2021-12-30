@@ -80,7 +80,7 @@
 
     {% block navbar %}
     <header class="navbar is-transparent" role="navigation" aria-label="main navigation">
-        <div class="navbar-brand container is-max-desktop">
+        <div class="navbar-brand container is-max-widescreen">
             <div class="navbar-brand">
                 <a class="navbar-item has-text-weight-bold is-uppercase" href="{{ config.base_url }}">
                     {{ config.title }}
@@ -92,7 +92,7 @@
 
     {% block content %}
     <section class="section">
-        <div class="container is-max-desktop">
+        <div class="container is-max-widescreen">
             {% for page in paginator.pages %}
                 <article>
                     <header class="pb-5">
@@ -155,7 +155,7 @@
 
     {% block footer %}
     <footer class="footer mt-auto">
-        <div class="container is-max-desktop">
+        <div class="container is-max-widescreen">
             <div class="image is-96x96 ml-auto mr-auto">
                 <img src='/nyan.svg' alt="ascii kitten">
             </div>
