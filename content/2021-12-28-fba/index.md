@@ -1,7 +1,6 @@
 +++
 title = 'Flux Balance Analysis'
 description = 'Basic concept of flux balance analysis (FBA) and its application on target identification of SARS-CoV-2.'
-date = '2021-12-28'
 +++
 
 Flux balance analysis (FBA) is a mathematical approach for analyzing the flow of metabolites through a metabolic
