@@ -17,7 +17,7 @@ highlight_theme = 'css'
 highlight_themes_css = [
   { theme = 'solarized-light', filename = 'css/syntax.css' },
 ]
-smart_punctuation = false
+smart_punctuation = true
 render_emoji = true
 
 [extra]
