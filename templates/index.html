@@ -32,6 +32,9 @@
             gtag('config', '{{config.extra.google_analytics}}');
         </script>
         {% endblock %}
+        {% block adsense %}
+        <script data-ad-client="{{config.extra.google_adsense}}" async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+        {% endblock %}
     {% endif %}
 
     {% block feed %}
