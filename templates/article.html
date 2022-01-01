@@ -10,14 +10,16 @@
 {% block content %}
 <section class="section">
     <article class="container is-max-widescreen">
-        <div class="columns is-multiline is-variable is-8-widescreen">
-            <header class="column is-full">
+        <div class="columns is-variable is-8-widescreen">
+            <header class="column">
                 <h1 class="title is-2">{{ page.title }}</h1>
                 <p class="subtitle is-6">
                     <time datetime="{{ page.date }}">{{ page.date }}</time>
                 </p>
                 <hr>
             </header>
+        </div>
+        <div class="columns is-variable is-8-widescreen">
             {% if page.toc %}
                 <aside class="menu column is-one-quarter is-one-third-widescreen is-hidden-touch">
                     <p class="menu-label title">Table of Contents</p>
@@ -40,7 +42,9 @@
             <div class="content column">
                 {{ page.content | safe }}
             </div>
-            <article class="giscus column is-full"></article>
+        </div>
+        <div class="columns is-variable is-8-widescreen">
+            <article class="giscus column"></article>
         </div>
     </article>
 </section>

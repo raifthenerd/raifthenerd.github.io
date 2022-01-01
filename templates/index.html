@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang | default(value=config.default_language) }}">
+<html lang="{{ page.extra.lang | default(value=lang) }}">
 
 <head>
     <meta charset="utf-8">
@@ -11,7 +11,6 @@
     {% endblock %}
 
     {% block style %}
-    <link rel="stylesheet" href="/css/default.css">
     {% block math %}
     <link rel="stylesheet" href="/css/katex.min.css">
     <script defer src="/js/katex.min.js"></script>
@@ -22,6 +21,7 @@
     <script src="/js/vega-lite.min.js"></script>
     <script src="/js/vega-embed.min.js"></script>
     {% endblock %}
+    <link rel="stylesheet" href="/css/default.css">
     {% endblock %}
     {% if config.mode == "Build" %}
         {% block comment %}

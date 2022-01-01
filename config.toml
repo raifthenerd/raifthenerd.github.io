@@ -15,7 +15,7 @@ ignored_content = []
 highlight_code = true
 highlight_theme = 'Box UK Light (rainglow)'
 extra_syntaxes_and_themes = ['highlighting']
-smart_punctuation = true
+smart_punctuation = false
 render_emoji = true
 
 [extra]
