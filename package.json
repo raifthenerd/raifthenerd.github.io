@@ -2,7 +2,10 @@
   "dependencies": {
     "bulma": "^0.9.3",
     "clipboard": "^2.0.8",
-    "katex": "^0.15.1"
+    "katex": "^0.15.1",
+    "vega": "^5.21.0",
+    "vega-embed": "^6.20.5",
+    "vega-lite": "^5.2.0"
   },
   "devDependencies": {
     "copy-webpack-plugin": "^10.2.0",

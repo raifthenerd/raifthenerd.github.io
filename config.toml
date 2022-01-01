@@ -13,10 +13,8 @@ ignored_content = []
 
 [markdown]
 highlight_code = true
-highlight_theme = 'css'
-highlight_themes_css = [
-  { theme = 'solarized-light', filename = 'css/syntax.css' },
-]
+highlight_theme = 'Box UK Light (rainglow)'
+extra_syntaxes_and_themes = ['highlighting']
 smart_punctuation = true
 render_emoji = true
 

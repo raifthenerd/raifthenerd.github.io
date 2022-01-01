@@ -11,12 +11,16 @@
     {% endblock %}
 
     {% block style %}
-    <link rel="stylesheet" href="/css/syntax.css">
     <link rel="stylesheet" href="/css/default.css">
     {% block math %}
     <link rel="stylesheet" href="/css/katex.min.css">
     <script defer src="/js/katex.min.js"></script>
     <script defer src="/js/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+    {% endblock %}
+    {% block plot %}
+    <script src="/js/vega.min.js"></script>
+    <script src="/js/vega-lite.min.js"></script>
+    <script src="/js/vega-embed.min.js"></script>
     {% endblock %}
     {% endblock %}
     {% if config.mode == "Build" %}
