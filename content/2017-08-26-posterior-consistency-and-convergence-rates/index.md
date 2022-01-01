@@ -1,6 +1,8 @@
 +++
 title = "Posterior Consistency and Posterior Convergence Rates (in Korean)"
 description = "비모수 베이지안 관점에서의 사후분포 일치성과 수렴 속도."
+[extra]
+lang = "ko"
 +++
 
 베이즈 추론은 사후분포에 의존하므로 사후분포가 얼마나 좋은 성질을 가지느냐에 따라 추정이나 예측, 추론이 얼마나 좋은지가
