@@ -97,24 +97,28 @@
     {% block content %}
     <section class="section">
         <div class="container is-max-widescreen">
-            {% for page in paginator.pages %}
-                <article>
-                    <header class="pb-5">
-                        <p class="subtitle is-5">
-                            <time datetime="{{ page.date }}">{{ page.date }}</time>
-                        </p>
-                        <h1 class="title is-1">
-                            <a href="{{ page.permalink | safe }}">
-                                {{ page.title }}
-                            </a>
-                        </h1>
-                    </header>
-                    <div class="content">
-                        {{ page.summary | safe }}
-                    </div>
-                </article>
-                <hr>
-            {% endfor %}
+            <ul>
+                {% for page in paginator.pages %}
+                    <li>
+                        <article>
+                            <header class="pb-5">
+                                <p class="subtitle is-5">
+                                    <time datetime="{{ page.date }}">{{ page.date }}</time>
+                                </p>
+                                <h1 class="title is-1">
+                                    <a href="{{ page.permalink | safe }}">
+                                        {{ page.title }}
+                                    </a>
+                                </h1>
+                            </header>
+                            <div class="content">
+                                {{ page.summary | safe }}
+                            </div>
+                        </article>
+                        <hr>
+                    </li>
+                {% endfor %}
+            </ul>
             <nav class="subtitle is-3">
                 {% if paginator.number_pagers > 1 %}
                     {% if paginator.previous %}
