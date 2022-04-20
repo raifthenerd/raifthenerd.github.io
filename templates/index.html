@@ -23,7 +23,7 @@
     {% endblock %}
     <link rel="stylesheet" href="/css/default.css">
     {% endblock %}
-    {% if config.mode == "Build" %}
+    {% if config.mode != "serve" %}
         {% block comment %}
         {% endblock %}
         {% block analytics %}
