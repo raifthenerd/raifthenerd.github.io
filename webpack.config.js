@@ -2,7 +2,7 @@ const CopyPlugin = require("copy-webpack-plugin");
 
 module.exports = {
     entry: './index.js',
-    mode: 'production',
+    mode: process.env.NODE_ENV,
     plugins: [
         new CopyPlugin({
             patterns: [
