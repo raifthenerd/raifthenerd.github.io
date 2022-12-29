@@ -1,5 +1,8 @@
 {
   "dependencies": {
+    "@fontsource/gothic-a1": "^4.5.9",
+    "@fontsource/inter": "^4.5.14",
+    "@fontsource/jetbrains-mono": "^4.5.11",
     "bulma": "^0.9.3",
     "katex": "^0.15.1",
     "vega": "^5.21.0",

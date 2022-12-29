@@ -6,6 +6,9 @@ module.exports = {
     plugins: [
         new CopyPlugin({
             patterns: [
+                { from: 'node_modules/@fontsource/inter', to: '../static/css/fonts/inter/' },
+                { from: 'node_modules/@fontsource/gothic-a1', to: '../static/css/fonts/gothic-a1/' },
+                { from: 'node_modules/@fontsource/jetbrains-mono', to: '../static/css/fonts/jetbrains-mono/' },
                 { from: 'node_modules/katex/dist/fonts', to: '../static/css/fonts/' },
                 { from: 'node_modules/katex/dist/katex.min.css', to: '../static/css/' },
                 { from: 'node_modules/katex/dist/katex.min.js', to: '../static/js/' },
