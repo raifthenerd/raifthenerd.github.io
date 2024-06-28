@@ -1,0 +1,141 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta content="width=device-width,initial-scale=1" name=viewport><link href=/favicon.svg rel=icon type=image/svg+xml><link rel="alternate icon" href=/favicon.png type=image/png><link href=/css/katex.min.css rel=stylesheet><script defer src=/js/katex.min.js></script><script defer onload=renderMathInElement(document.body); src=/js/auto-render.min.js></script><script src=/js/vega.min.js></script><script src=/js/vega-lite.min.js></script><script src=/js/vega-embed.min.js></script><link href=/css/default.css rel=stylesheet><script async crossorigin data-category=Comments data-category-id=DIC_kwDOGkX-x84CAY8r data-emit-metadata=0 data-input-position=top data-lang=en data-mapping=pathname data-reactions-enabled=1 data-repo=raifthenerd/raifthenerd.github.io data-repo-id=R_kgDOGkX-xw data-theme=light src=https://giscus.app/client.js></script><script src="https://www.googletagmanager.com/gtag/js?id=G-XXY96K3XP3" async></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','G-XXY96K3XP3')</script><script async data-ad-client=ca-pub-5141260618801038 src=https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js></script><link href=https://blog.raifthenerd.com/atom.xml rel=alternate title=Feeds type=application/atom+xml><meta content=website property=og:type><meta content=https://blog.raifthenerd.com/cpython-mem-gc-optim/ property=og:url><meta content=.sh property=og:site_name><meta content=summary name=twitter:card><title>CPython Internals: Optimization in Garbage Collection ― .sh</title><meta content="CPython Internals: Optimization in Garbage Collection ― .sh" property=og:title><meta content="CPython Internals: Optimization in Garbage Collection ― .sh" name=twitter:title><meta content="Several optimization techniques on CPython's GC module." name=description><meta content="Several optimization techniques on CPython's GC module." property=og:description><meta content="Several optimization techniques on CPython's GC module." name=twitter:description><meta content=https://blog.raifthenerd.com/thumbnail.png name=twitter:image><meta content=https://blog.raifthenerd.com/thumbnail.png property=og:image><body><header aria-label="main navigation" class="navbar is-transparent" role=navigation><div class="navbar-brand container is-max-widescreen"><div class=navbar-brand><a class="navbar-item has-text-weight-bold is-uppercase" href=https://blog.raifthenerd.com> .sh </a></div></div></header><section class=section><article class="container is-max-widescreen"><div class="columns is-variable is-8-widescreen"><header class=column><h1 class="title is-2">CPython Internals: Optimization in Garbage Collection</h1><p class="subtitle is-6"><time datetime=2022-01-03>2022-01-03</time><hr></header></div><div class="columns is-variable is-8-widescreen"><aside class="menu column is-one-quarter is-one-third-widescreen is-hidden-touch"><p class=menu-label>Table of Contents<ul class=menu-list><li><a href=https://blog.raifthenerd.com/cpython-mem-gc-optim/#generations>Generations</a> <ul><li><a href=https://blog.raifthenerd.com/cpython-mem-gc-optim/#collecting-the-oldest-generation>Collecting the Oldest Generation</a></ul><li><a href=https://blog.raifthenerd.com/cpython-mem-gc-optim/#delay-tracking-containers>Delay Tracking Containers</a> <ul><li><a href=https://blog.raifthenerd.com/cpython-mem-gc-optim/#tuples>Tuples</a><li><a href=https://blog.raifthenerd.com/cpython-mem-gc-optim/#dictionaries>Dictionaries</a></ul><li><a href=https://blog.raifthenerd.com/cpython-mem-gc-optim/#references>References</a></ul></aside><div class="content column"><p>Without proper optimizations, the basic CPython garbage collector <a href=../cpython-mem-gc>covered in previous post</a> may result in quadratic time complexity. Two techniques are currently applied: using generations and untracking some objects during GC.</p><span id=continue-reading></span><p><em>All codes in this post are based on <a href=https://github.com/python/cpython/tree/v3.10.0>CPython v3.10</a>.</em><h2 id=generations>Generations</h2><p>Most objects have a very short lifespan in reality, implicitly implies that older objects are less likely to become unreachable. To take advantage of this fact, CPython manages all objects into three <em>generations</em>.<p>Initially, all objects are placed into the generation 0, and each time they survive after GC is applied to the object, they move on to the next generation. GC is executed separately for each generation, and whenever executed, GC only scans the objects belonging the younger generations.<pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>typedef struct</span><span> _gc_runtime_state {
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>    </span><span style=color:#b8b6b1>// all generations with supplementary info; see below
+</span><span>    </span><span style=color:#017c9d>struct</span><span> gc_generation generations[NUM_GENERATIONS];
+</span><span>    </span><span style=color:#b8b6b1>// shortcut for the youngest generation
+</span><span>    PyGC_Head </span><span style=color:#017c9d>*</span><span>generation0;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// # of objects survived the last full collection
+</span><span>    Py_ssize_t long_lived_total;
+</span><span>    </span><span style=color:#b8b6b1>// # of objects survived all "non-full" collections
+</span><span>    Py_ssize_t long_lived_pending;
+</span><span>} GCState;
+</span><span>
+</span><span style=color:#019d76>static</span><span> Py_ssize_t </span><span style=color:#15b8ae>gc_collect_main</span><span>(PyThreadState </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>tstate</span><span>,
+</span><span>                                  </span><span style=color:#017c9d>int </span><span style=font-style:italic;color:#414f5c>generation</span><span>,
+</span><span>                                  Py_ssize_t </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>n_collected</span><span>,
+</span><span>                                  Py_ssize_t </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>n_uncollectable</span><span>,
+</span><span>                                  </span><span style=color:#017c9d>int </span><span style=font-style:italic;color:#414f5c>nofail</span><span>) {
+</span><span>    </span><span style=color:#b8b6b1>// get runtime GC info
+</span><span>    GCState </span><span style=color:#017c9d>*</span><span>gcstate </span><span style=color:#017c9d>= &</span><span>tstate->interp->gc;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// update runtime info; see below.
+</span><span>    </span><span style=color:#017c9d>if </span><span>(generation</span><span style=color:#017c9d>+</span><span style=color:#15b8ae>1 </span><span style=color:#017c9d><</span><span> NUM_GENERATIONS)
+</span><span>        gcstate->generations[generation</span><span style=color:#017c9d>+</span><span style=color:#15b8ae>1</span><span>].count </span><span style=color:#017c9d>+= </span><span style=color:#15b8ae>1</span><span>;
+</span><span>    </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d><=</span><span> generation; i</span><span style=color:#017c9d>++</span><span>)
+</span><span>        gcstate->generations[i].count </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// merge every younger generations and find older generation
+</span><span>    PyGC_Head </span><span style=color:#017c9d>*</span><span>young, </span><span style=color:#017c9d>*</span><span>old;
+</span><span>    </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d><</span><span> generation; i</span><span style=color:#017c9d>++</span><span>)
+</span><span>        gc_list_merge(GEN_HEAD(gcstate, i), GEN_HEAD(gcstate, generation));
+</span><span>    young </span><span style=color:#017c9d>= </span><span>GEN_HEAD(gcstate, generation);
+</span><span>    </span><span style=color:#017c9d>if </span><span>(generation </span><span style=color:#017c9d><</span><span> NUM_GENERATIONS</span><span style=color:#017c9d>-</span><span style=color:#15b8ae>1</span><span>)
+</span><span>        old </span><span style=color:#017c9d>= </span><span>GEN_HEAD(gcstate, generation</span><span style=color:#017c9d>+</span><span style=color:#15b8ae>1</span><span>);
+</span><span>    </span><span style=color:#017c9d>else  </span><span style=color:#b8b6b1>// already oldest
+</span><span>        old </span><span style=color:#017c9d>=</span><span> young;
+</span><span>
+</span><span>    PyGC_Head unreachable;
+</span><span>    deduce_unreachable(young, </span><span style=color:#017c9d>&</span><span>unreachable);  </span><span style=color:#b8b6b1>// cycle detection on young gen
+</span><span>
+</span><span>    untrack_tuples(young);          </span><span style=color:#b8b6b1>// untrack tuples; see below
+</span><span>    </span><span style=color:#017c9d>if </span><span>(young </span><span style=color:#017c9d>!=</span><span> old)               </span><span style=color:#b8b6b1>// non-full collection
+</span><span>        gc_list_merge(young, old);  </span><span style=color:#b8b6b1>// move reachable objects to next gen
+</span><span>    </span><span style=color:#017c9d>else                            </span><span style=color:#b8b6b1>// full collection
+</span><span>        untrack_dicts(young);       </span><span style=color:#b8b6b1>// untrack dicts; see below
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// update runtime info; see below.
+</span><span>    </span><span style=color:#017c9d>if </span><span>(young </span><span style=color:#017c9d>!=</span><span> old) {  </span><span style=color:#b8b6b1>// non-full collection
+</span><span>        </span><span style=color:#017c9d>if </span><span>(generation </span><span style=color:#017c9d>==</span><span> NUM_GENERATIONS </span><span style=color:#017c9d>- </span><span style=color:#15b8ae>2</span><span>)
+</span><span>            gcstate->long_lived_pending </span><span style=color:#017c9d>+= </span><span>gc_list_size(young);
+</span><span>    } </span><span style=color:#017c9d>else </span><span>{             </span><span style=color:#b8b6b1>// full collection
+</span><span>        gcstate->long_lived_pending </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>;
+</span><span>        gcstate->long_lived_total </span><span style=color:#017c9d>= </span><span>gc_list_size(young);
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>}
+</span></code></pre><p>The execution schedule is determined by runtime information stored in each generation. Whenver the criteria is met for each generation, GC is executed. Current criteria are:<ul><li>Generation 0: allocation count exceeds 700.<li>Generation 1: GC execution count on generation 0 exceeds 10.<li>Generation 2 (<em>a.k.a.</em> full collection): GC execution count on generation 1 exceeds 10, and <code>long_lived_pending / long_lived_total > 25%</code>.</ul><pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>struct </span><span>gc_generation {
+</span><span>    PyGC_Head head;
+</span><span>    </span><span style=color:#017c9d>int</span><span> threshold;
+</span><span>    </span><span style=color:#017c9d>int</span><span> count;      </span><span style=color:#b8b6b1>// generation 0: # of allocations
+</span><span>                    </span><span style=color:#b8b6b1>// generation n: # of collections of younger generation
+</span><span>};
+</span><span>
+</span><span style=color:#017c9d>void </span><span style=color:#15b8ae>_PyGC_InitState</span><span>(GCState </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>gcstate</span><span>) {
+</span><span>    </span><span style=color:#017c9d>struct</span><span> gc_generation generations[NUM_GENERATIONS] </span><span style=color:#017c9d>= </span><span>{
+</span><span>        </span><span style=color:#b8b6b1>//                                        PyGC_Head,  threshold,  count
+</span><span>        </span><span style=color:#b8b6b1>// youngest
+</span><span>        {{(</span><span style=font-style:italic;color:#019d76>uintptr_t</span><span>)_GEN_HEAD(</span><span style=color:#15b8ae>0</span><span>), (</span><span style=font-style:italic;color:#019d76>uintptr_t</span><span>)_GEN_HEAD(</span><span style=color:#15b8ae>0</span><span>)},  </span><span style=color:#15b8ae>700</span><span>,        </span><span style=color:#15b8ae>0</span><span>},
+</span><span>        {{(</span><span style=font-style:italic;color:#019d76>uintptr_t</span><span>)_GEN_HEAD(</span><span style=color:#15b8ae>1</span><span>), (</span><span style=font-style:italic;color:#019d76>uintptr_t</span><span>)_GEN_HEAD(</span><span style=color:#15b8ae>1</span><span>)},  </span><span style=color:#15b8ae>10</span><span>,         </span><span style=color:#15b8ae>0</span><span>},
+</span><span>        {{(</span><span style=font-style:italic;color:#019d76>uintptr_t</span><span>)_GEN_HEAD(</span><span style=color:#15b8ae>2</span><span>), (</span><span style=font-style:italic;color:#019d76>uintptr_t</span><span>)_GEN_HEAD(</span><span style=color:#15b8ae>2</span><span>)},  </span><span style=color:#15b8ae>10</span><span>,         </span><span style=color:#15b8ae>0</span><span>},
+</span><span>        </span><span style=color:#b8b6b1>// oldest
+</span><span>    };
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>}
+</span><span>
+</span><span style=color:#b8b6b1>// can be executed while allocation
+</span><span style=color:#019d76>static</span><span> Py_ssize_t </span><span style=color:#15b8ae>gc_collect_generations</span><span>(PyThreadState </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>tstate</span><span>) {
+</span><span>    GCState </span><span style=color:#017c9d>*</span><span>gcstate </span><span style=color:#017c9d>= &</span><span>tstate->interp->gc;
+</span><span>    Py_ssize_t n </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>;
+</span><span>    </span><span style=color:#017c9d>for </span><span>(</span><span style=color:#017c9d>int</span><span> i </span><span style=color:#017c9d>=</span><span> NUM_GENERATIONS</span><span style=color:#017c9d>-</span><span style=color:#15b8ae>1</span><span>; i </span><span style=color:#017c9d>>= </span><span style=color:#15b8ae>0</span><span>; i</span><span style=color:#017c9d>--</span><span>) {
+</span><span>        </span><span style=color:#b8b6b1>// most oldest generation w/ count > threshold
+</span><span>        </span><span style=color:#017c9d>if </span><span>(gcstate->generations[i].count </span><span style=color:#017c9d>></span><span> gcstate->generations[i].threshold) {
+</span><span>
+</span><span>            </span><span style=color:#b8b6b1>// prevents full collection executed frequently; see below
+</span><span>            </span><span style=color:#017c9d>if </span><span>(i </span><span style=color:#017c9d>==</span><span> NUM_GENERATIONS </span><span style=color:#017c9d>- </span><span style=color:#15b8ae>1
+</span><span>                </span><span style=color:#017c9d>&&</span><span> gcstate->long_lived_pending </span><span style=color:#017c9d><</span><span> gcstate->long_lived_total </span><span style=color:#017c9d>/ </span><span style=color:#15b8ae>4</span><span>)
+</span><span>                </span><span style=color:#017c9d>continue</span><span>;
+</span><span>
+</span><span>            </span><span style=color:#b8b6b1>// thin wrapper of `gc_collect_main`
+</span><span>            n </span><span style=color:#017c9d>= </span><span>gc_collect_with_callback(tstate, i);
+</span><span>            </span><span style=color:#017c9d>break</span><span>;
+</span><span>        }
+</span><span>    }
+</span><span>    </span><span style=color:#017c9d>return</span><span> n;
+</span><span>}
+</span></code></pre><p>In CPython, objects of these generations can be examined by using <code>gc.get_objects(generation=NUM)</code> and GC can be manually triggered by calling <code>gc.collect(generation=NUM)</code>.<h3 id=collecting-the-oldest-generation>Collecting the Oldest Generation</h3><p>It has been remarked that periodically doing a full collection may entail a performance degradation (<em>e.g.</em>, quadratic time complexity). The reason is that cost of a full collection is proportional to the total number of long-lived objects, which is virtually <em>unbounded</em>.<p>CPython solves this issue by reducing the number of full GC calls, by using another criteria that yields amortized linear performance in the total number of objects in practice.<p>More details can be found on the <a href=http://mail.python.org/pipermail/python-dev/2008-June/080579.html>proposal</a> from <code>python-dev</code> mailing list.<h2 id=delay-tracking-containers>Delay Tracking Containers</h2><p>Certain types of containers <em>cannot</em> participate in a reference cycle (<em>e.g.</em>, primitive objects like integer), so untracking these objects reduces the cost of GC. Although, determining which objects may be untracked is not free.<p>As a general rule, instances of atomic types aren't tracked and instances of non-atomic types (<em>e.g.</em>, containers, user-defined objects...) are. Also, some type-specific optimizations are implemented:<h3 id=tuples>Tuples</h3><ul><li><p>All tuples except the empty tuple are tracked when created.</p><li><p>A tuple then can be untracked while collection if all of its contents are already not tracked. Note that it may take several cycles to untrack a tuple.</p> <pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>void </span><span style=color:#15b8ae>_PyTuple_MaybeUntrack</span><span>(PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>op</span><span>) {
+</span><span>    PyTupleObject </span><span style=color:#017c9d>*</span><span>t </span><span style=color:#017c9d>= </span><span>(PyTupleObject </span><span style=color:#017c9d>*</span><span>) op;
+</span><span>    Py_ssize_t i;
+</span><span>    </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d>< </span><span>Py_SIZE(t); i</span><span style=color:#017c9d>++</span><span>) {
+</span><span>        PyObject </span><span style=color:#017c9d>*</span><span>elt </span><span style=color:#017c9d>= </span><span>PyTuple_GET_ITEM(t, i);
+</span><span>
+</span><span>        </span><span style=color:#b8b6b1>/* Tuple with NULL elements aren't fully constructed,
+</span><span style=color:#b8b6b1>        don't untrack them yet. */
+</span><span>        </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>elt </span><span style=color:#017c9d>|| </span><span>_PyObject_GC_MAY_BE_TRACKED(elt)) </span><span style=color:#017c9d>return</span><span>;
+</span><span>    }
+</span><span>    _PyObject_GC_UNTRACK(op);
+</span><span>}
+</span></code></pre></ul><h3 id=dictionaries>Dictionaries</h3><ul><li><p>Empty dictionaries are untracked.</p><li><p>If a tracked item is inserted either as a key or value, the dictionary becomes tracked.</p><li><p>During a full collection, the collector will untrack any dictionaries whose contents are not tracked. Note that the dictionaries can be untracked during the full collection only, to avoid quadratic build-up time.</p> <pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>#define </span><span style=color:#15b8ae>_PyDict_HasSplitTable</span><span>(</span><span style=font-style:italic;color:#414f5c>d</span><span>) ((d)->ma_values </span><span style=color:#017c9d>!= </span><span style=color:#019d76>NULL</span><span>)
+</span><span style=color:#017c9d>void </span><span style=color:#15b8ae>_PyDict_MaybeUntrack</span><span>(PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>op</span><span>) {
+</span><span>    PyDictObject </span><span style=color:#017c9d>*</span><span>mp </span><span style=color:#017c9d>= </span><span>(PyDictObject </span><span style=color:#017c9d>*</span><span>) op;
+</span><span>    PyDictKeyEntry </span><span style=color:#017c9d>*</span><span>ep0;
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>value;
+</span><span>    Py_ssize_t i, numentries;
+</span><span>
+</span><span>    ep0 </span><span style=color:#017c9d>= </span><span>DK_ENTRIES(mp->ma_keys);
+</span><span>    numentries </span><span style=color:#017c9d>=</span><span> mp->ma_keys->dk_nentries;
+</span><span>    </span><span style=color:#017c9d>if </span><span>(_PyDict_HasSplitTable(mp)) {  </span><span style=color:#b8b6b1>// key in ma_keys and value in ma_values
+</span><span>        </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d><</span><span> numentries; i</span><span style=color:#017c9d>++</span><span>) {
+</span><span>            </span><span style=color:#017c9d>if </span><span>((value </span><span style=color:#017c9d>=</span><span> mp->ma_values[i]) </span><span style=color:#017c9d>== </span><span style=color:#019d76>NULL</span><span>)
+</span><span>                </span><span style=color:#017c9d>continue</span><span>;
+</span><span>            </span><span style=color:#017c9d>if </span><span>(_PyObject_GC_MAY_BE_TRACKED(value)) {
+</span><span>                </span><span style=color:#019d76>assert</span><span>(</span><span style=color:#017c9d>!</span><span>_PyObject_GC_MAY_BE_TRACKED(ep0[i].me_key));
+</span><span>                </span><span style=color:#017c9d>return</span><span>;
+</span><span>            }
+</span><span>        }
+</span><span>    } </span><span style=color:#017c9d>else </span><span>{  </span><span style=color:#b8b6b1>// key and value are in ma_keys
+</span><span>        </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d><</span><span> numentries; i</span><span style=color:#017c9d>++</span><span>) {
+</span><span>            </span><span style=color:#017c9d>if </span><span>((value </span><span style=color:#017c9d>=</span><span> ep0[i].me_value) </span><span style=color:#017c9d>== </span><span style=color:#019d76>NULL</span><span>)
+</span><span>                </span><span style=color:#017c9d>continue</span><span>;
+</span><span>            </span><span style=color:#017c9d>if </span><span>(_PyObject_GC_MAY_BE_TRACKED(value) </span><span style=color:#017c9d>||
+</span><span>                _PyObject_GC_MAY_BE_TRACKED(ep0[i].me_key))
+</span><span>                </span><span style=color:#017c9d>return</span><span>;
+</span><span>        }
+</span><span>    }
+</span><span>    _PyObject_GC_UNTRACK(op);
+</span><span>}
+</span></code></pre></ul><h2 id=references>References</h2><ul><li>Pablo Galindo Salgado, <a href=https://devguide.python.org/garbage_collector/>Design of CPython's Garbage Collector</a><li>Martin von Löwis, <a href=http://mail.python.org/pipermail/python-dev/2008-June/080579.html>Proposal: Run GC less often</a><li>Issue <a href=https://bugs.python.org/issue4074>#4074</a> and <a href=https://bugs.python.org/issue14775>#14775</a></ul></div></div><div class="columns is-variable is-8-widescreen"><article class="giscus column"></article></div></article></section><footer class="footer mt-auto"><div class="container is-max-widescreen"><div class="image is-96x96 ml-auto mr-auto"><img alt="ascii kitten" src=/nyan.svg></div><div class="has-text-centered is-size-7"><small> © <a rel="author external" href=https://github.com/raifthenerd/raifthenerd>Seokjin Han</a> 2022. All contents on this website is licensed under <a rel="license external" href=https://creativecommons.org/licenses/by-sa/4.0/>CC BY-SA 4.0</a>. <br> <a href=/policy rel=license>Privacy Policy</a> </small></div></div></footer>

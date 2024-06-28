@@ -1,0 +1,225 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta content="width=device-width,initial-scale=1" name=viewport><link href=/favicon.svg rel=icon type=image/svg+xml><link rel="alternate icon" href=/favicon.png type=image/png><link href=/css/katex.min.css rel=stylesheet><script defer src=/js/katex.min.js></script><script defer onload=renderMathInElement(document.body); src=/js/auto-render.min.js></script><script src=/js/vega.min.js></script><script src=/js/vega-lite.min.js></script><script src=/js/vega-embed.min.js></script><link href=/css/default.css rel=stylesheet><script async crossorigin data-category=Comments data-category-id=DIC_kwDOGkX-x84CAY8r data-emit-metadata=0 data-input-position=top data-lang=en data-mapping=pathname data-reactions-enabled=1 data-repo=raifthenerd/raifthenerd.github.io data-repo-id=R_kgDOGkX-xw data-theme=light src=https://giscus.app/client.js></script><script src="https://www.googletagmanager.com/gtag/js?id=G-XXY96K3XP3" async></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','G-XXY96K3XP3')</script><script async data-ad-client=ca-pub-5141260618801038 src=https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js></script><link href=https://blog.raifthenerd.com/atom.xml rel=alternate title=Feeds type=application/atom+xml><meta content=website property=og:type><meta content=https://blog.raifthenerd.com/cpython-backend-irgen/ property=og:url><meta content=.sh property=og:site_name><meta content=summary name=twitter:card><title>CPython Internals: IR Generation ― .sh</title><meta content="CPython Internals: IR Generation ― .sh" property=og:title><meta content="CPython Internals: IR Generation ― .sh" name=twitter:title><meta content="How CPython translate the AST to the control flow graph?" name=description><meta content="How CPython translate the AST to the control flow graph?" property=og:description><meta content="How CPython translate the AST to the control flow graph?" name=twitter:description><meta content=https://blog.raifthenerd.com/thumbnail.png name=twitter:image><meta content=https://blog.raifthenerd.com/thumbnail.png property=og:image><body><header aria-label="main navigation" class="navbar is-transparent" role=navigation><div class="navbar-brand container is-max-widescreen"><div class=navbar-brand><a class="navbar-item has-text-weight-bold is-uppercase" href=https://blog.raifthenerd.com> .sh </a></div></div></header><section class=section><article class="container is-max-widescreen"><div class="columns is-variable is-8-widescreen"><header class=column><h1 class="title is-2">CPython Internals: IR Generation</h1><p class="subtitle is-6"><time datetime=2022-03-09>2022-03-09</time><hr></header></div><div class="columns is-variable is-8-widescreen"><aside class="menu column is-one-quarter is-one-third-widescreen is-hidden-touch"><p class=menu-label>Table of Contents<ul class=menu-list><li><a href=https://blog.raifthenerd.com/cpython-backend-irgen/#brief-overview-of-pyast-compile>Brief Overview of _PyAST_Compile</a><li><a href=https://blog.raifthenerd.com/cpython-backend-irgen/#parsing-the-future-statements>Parsing the Future Statements</a><li><a href=https://blog.raifthenerd.com/cpython-backend-irgen/#optimizing-the-ast>Optimizing the AST</a><li><a href=https://blog.raifthenerd.com/cpython-backend-irgen/#building-the-symbol-table>Building the Symbol Table</a><li><a href=https://blog.raifthenerd.com/cpython-backend-irgen/#ir-generation>IR Generation</a><li><a href=https://blog.raifthenerd.com/cpython-backend-irgen/#reference>Reference</a></ul></aside><div class="content column"><p>As mentioned in the <a href=../cpython-frontend/>previous post</a>, there are multiple entrypoints to execute CPython. While these methods might have different strategy for converting the source code to the AST, they share the same entrypoint <code>_PyAST_Compile</code> defined in <code>Python/compile.c</code> to generate the control flow graph (CFG) and the bytecodes.</p><span id=continue-reading></span><p><em>All codes in this post are based on <a href=https://github.com/python/cpython/tree/v3.10.0>CPython v3.10</a>.</em><h2 id=brief-overview-of-pyast-compile>Brief Overview of <code>_PyAST_Compile</code></h2><p><code>_PyAST_Compile</code> makes several passes to build the code object:<ol><li>Checks for future statements (something like <code>from __future__ import ...</code>).<li>Optimize the AST, usually folding literals and/or constants.<li>Builds a symbol table.<li>Generate the CFG blocks.<li>Assemble the blocks and generate the bytecodes.</ol><pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span>PyCodeObject</span><span style=color:#017c9d>*
+</span><span style=color:#15b8ae>_PyAST_Compile</span><span>(mod_ty </span><span style=font-style:italic;color:#414f5c>mod</span><span>, PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>filename</span><span>,
+</span><span>               PyCompilerFlags </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>flags</span><span>, </span><span style=color:#017c9d>int </span><span style=font-style:italic;color:#414f5c>optimize</span><span>, PyArena </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>arena</span><span>) {
+</span><span>    </span><span style=color:#017c9d>struct</span><span> compiler c;
+</span><span>    PyCompilerFlags local_flags </span><span style=color:#017c9d>=</span><span> _PyCompilerFlags_INIT;
+</span><span>    _PyASTOptimizeState state;
+</span><span>    </span><span style=color:#b8b6b1>/* tedious initialization... */
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// check the future statements
+</span><span>    c.c_future </span><span style=color:#017c9d>= </span><span>_PyFuture_FromAST(mod, filename);
+</span><span>    </span><span style=color:#017c9d>if </span><span>(c.c_future </span><span style=color:#017c9d>== </span><span style=color:#019d76>NULL</span><span>)
+</span><span>        </span><span style=color:#017c9d>goto</span><span> finally;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// optimize ast
+</span><span>    </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>_PyAST_Optimize(mod, arena, </span><span style=color:#017c9d>&</span><span>state)) </span><span style=color:#017c9d>goto</span><span> finally;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// build symbol table
+</span><span>    c.c_st </span><span style=color:#017c9d>= </span><span>_PySymtable_Build(mod, filename, c.c_future);
+</span><span>    </span><span style=color:#017c9d>if </span><span>(c.c_st </span><span style=color:#017c9d>== </span><span style=color:#019d76>NULL</span><span>) {
+</span><span>        </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>PyErr_Occurred())
+</span><span>            PyErr_SetString(PyExc_SystemError, </span><span style=color:#15b8ae>"no symtable"</span><span>);
+</span><span>        </span><span style=color:#017c9d>goto</span><span> finally;
+</span><span>    }
+</span><span>
+</span><span>    PyCodeObject </span><span style=color:#017c9d>*</span><span>co </span><span style=color:#017c9d>= </span><span>compiler_mod(</span><span style=color:#017c9d>&</span><span>c, mod);
+</span><span>
+</span><span> finally:
+</span><span>    compiler_free(</span><span style=color:#017c9d>&</span><span>c);
+</span><span>    </span><span style=color:#019d76>assert</span><span>(co </span><span style=color:#017c9d>|| </span><span>PyErr_Occurred());
+</span><span>    </span><span style=color:#017c9d>return</span><span> co;
+</span><span>}
+</span><span>
+</span><span style=color:#019d76>static</span><span> PyCodeObject</span><span style=color:#017c9d>* </span><span style=color:#15b8ae>compiler_mod</span><span>(</span><span style=color:#017c9d>struct</span><span> compiler </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>c</span><span>, mod_ty </span><span style=font-style:italic;color:#414f5c>mod</span><span>) {
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>
+</span><span>    </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>compiler_enter_scope(c, module, COMPILER_SCOPE_MODULE, mod, </span><span style=color:#15b8ae>1</span><span>))
+</span><span>        </span><span style=color:#017c9d>return </span><span style=color:#019d76>NULL</span><span>;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// generate cfg blocks
+</span><span>    </span><span style=color:#017c9d>switch </span><span>(mod->kind) { </span><span style=color:#b8b6b1>/* ... */ </span><span>}
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// assemble the blocks and generate bytecodes
+</span><span>    co </span><span style=color:#017c9d>= </span><span>assemble(c, addNone);
+</span><span>
+</span><span>    compiler_exit_scope(c);
+</span><span>    </span><span style=color:#017c9d>return</span><span> co;
+</span><span>}
+</span></code></pre><h2 id=parsing-the-future-statements>Parsing the Future Statements</h2><p><code>_PyFuture_FromAST</code> is a thin wrapper of <code>future_parse</code> defined in <code>Python/future.c</code>. <code>future_parse</code> finds the statements in the AST, starting as <code>from futures import ...</code>, and updates <code>PyFutureFeatures</code> struct by using <code>future_check_features</code>. Note that not all future statements is effective, since the feature might be successfully merged as the Python language feature. As of CPython version 3.10, the only effective future statement is <code>annotations</code> (see <a href=https://www.python.org/dev/peps/pep-0563/>PEP-563</a> to find the effect of <code>from __future__ import annotations</code>).<pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>typedef struct </span><span>{
+</span><span>    </span><span style=color:#017c9d>int</span><span> ff_features;      </span><span style=color:#b8b6b1>// flags set by future statements
+</span><span>    </span><span style=color:#017c9d>int</span><span> ff_lineno;        </span><span style=color:#b8b6b1>// line number of last future statement
+</span><span>} PyFutureFeatures;
+</span><span>
+</span><span style=color:#017c9d>#define </span><span>FUTURE_DIVISION </span><span style=color:#15b8ae>"division"
+</span><span style=color:#017c9d>#define </span><span>FUTURE_ANNOTATIONS </span><span style=color:#15b8ae>"annotations"
+</span><span style=color:#b8b6b1>/* ... */
+</span><span>
+</span><span style=color:#019d76>static </span><span style=color:#017c9d>int
+</span><span style=color:#15b8ae>future_check_features</span><span>(PyFutureFeatures </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>ff</span><span>, stmt_ty </span><span style=font-style:italic;color:#414f5c>s</span><span>, PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>filename</span><span>) {
+</span><span>    </span><span style=color:#019d76>assert</span><span>(s->kind </span><span style=color:#017c9d>==</span><span> ImportFrom_kind);
+</span><span>    asdl_alias_seq </span><span style=color:#017c9d>*</span><span>names </span><span style=color:#017c9d>=</span><span> s->v.ImportFrom.names;
+</span><span>    </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d>< </span><span>asdl_seq_LEN(names); i</span><span style=color:#017c9d>++</span><span>) {
+</span><span>        alias_ty name </span><span style=color:#017c9d>= </span><span>(alias_ty)asdl_seq_GET(names, i);
+</span><span>        </span><span style=color:#019d76>const </span><span style=color:#017c9d>char *</span><span>feature </span><span style=color:#017c9d>= </span><span>PyUnicode_AsUTF8(name->name);
+</span><span>        </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#019d76>strcmp</span><span>(feature, FUTURE_DIVISION) </span><span style=color:#017c9d>== </span><span style=color:#15b8ae>0</span><span>) {
+</span><span>            </span><span style=color:#017c9d>continue</span><span>;  </span><span style=color:#b8b6b1>// do nothing,
+</span><span>                       </span><span style=color:#b8b6b1>// since the feature became the part of the language
+</span><span>        } </span><span style=color:#017c9d>else if </span><span>(</span><span style=color:#019d76>strcmp</span><span>(feature, FUTURE_ANNOTATIONS) </span><span style=color:#017c9d>== </span><span style=color:#15b8ae>0</span><span>) {
+</span><span>            ff->ff_features </span><span style=color:#017c9d>|=</span><span> CO_FUTURE_ANNOTATIONS;
+</span><span>        } </span><span style=color:#b8b6b1>/* ...and lot more else-if clauses */ </span><span>{
+</span><span>        } </span><span style=color:#017c9d>else </span><span>{
+</span><span>            PyErr_Format(PyExc_SyntaxError, UNDEFINED_FUTURE_FEATURE, feature);
+</span><span>            PyErr_SyntaxLocationObject(filename, s->lineno, s->col_offset </span><span style=color:#017c9d>+ </span><span style=color:#15b8ae>1</span><span>);
+</span><span>            </span><span style=color:#017c9d>return </span><span style=color:#15b8ae>0</span><span>;
+</span><span>        }
+</span><span>    }
+</span><span>    </span><span style=color:#017c9d>return </span><span style=color:#15b8ae>1</span><span>;
+</span><span>}
+</span></code></pre><h2 id=optimizing-the-ast>Optimizing the AST</h2><p>Usually, the code optimization can be done in both high and low levels. CPython's high-level optimization routines are defined in <code>Python/ast_opt.c</code>, most of which are related to (safely) folding multiple literal/constant nodes into a single node. Some notable optimizations are:<ul><li>Change the literal list into the constant tuple in the iteration.<li>Change the set of constants into the frozenset in the iteration.</ul><p>Both optimization steps are implemented in <code>fold_iter</code>.<h2 id=building-the-symbol-table>Building the Symbol Table</h2><p>A <em>symbol table</em> is a data structure containing information flag about identifiers (<em>e.g.</em>, type, location, ...). The primary goal of symbol tables is to map the identifier to the memory positions. For instance, consider the following pseudocode:<pre class=language-rust data-lang=rust style=background:#fff;color:#414f5c><code class=language-rust data-lang=rust><span style=color:#017c9d>let</span><span> i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>42</span><span>;        </span><span style=color:#b8b6b1>// &LT- global variable i
+</span><span style=color:#017c9d>let </span><span style=color:#019d76>mut</span><span> acc </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>;
+</span><span style=color:#017c9d>for</span><span> i </span><span style=color:#017c9d>in </span><span style=color:#15b8ae>0</span><span style=color:#017c9d>..</span><span style=color:#15b8ae>100 </span><span>{  </span><span style=color:#b8b6b1>// &LT- local variable i; should assign different memory
+</span><span>    acc </span><span style=color:#017c9d>+=</span><span> i;
+</span><span>}
+</span><span>println!(</span><span style=color:#15b8ae>"</span><span style=color:#019d76>{i}</span><span style=color:#15b8ae>"</span><span>)    </span><span style=color:#b8b6b1>// &LT- 42
+</span></code></pre><p>As written in the comment, although the variable <code>i</code>s have the same character, all of them do not point to same memory. By analyzing informations stored in the symbol tables, the program can allocate the correct memory address to the identifiers.<p>The most common implementation is the hierarchical (or nested) symbol tables with two phases:<ol><li><p>Collect the raw information via following steps.</p> <ul><li>The symbol table manager creates a global symbol table and walks through the AST to fill the symbol table by calling the proper <code>symtable_visit_xx</code> function.<li>If the manager enters a new scope (<em>e.g.</em>, function, module, class, annotation), the manager creates a new empty symbol table and assign it as the child of the current symbol table.<li>The context is updated whenever the scope has been changed.</ul><li><p>Analyze the collected information and get the actual memory bindings via the CPython name resolution algorithm.</p></ol><p>In CPython, the symbol tables and the manager are defined in <code>Include/internal/pycore_symtable.h</code>.<pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>typedef struct</span><span> _symtable_entry {
+</span><span>    PyObject_HEAD
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>ste_id;          </span><span style=color:#b8b6b1>// int: key in ste_table->st_blocks
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>ste_symbols;     </span><span style=color:#b8b6b1>// dict: variable names to flags
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>ste_name;        </span><span style=color:#b8b6b1>// name of current block
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>ste_varnames;    </span><span style=color:#b8b6b1>// list of function parameters
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>ste_children;    </span><span style=color:#b8b6b1>// list of child blocks
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>ste_directives;  </span><span style=color:#b8b6b1>// locations of global and nonlocal stmt
+</span><span>    _Py_block_ty ste_type;     </span><span style=color:#b8b6b1>// module, class, or function
+</span><span>
+</span><span>    </span><span style=color:#017c9d>struct</span><span> symtable </span><span style=color:#017c9d>*</span><span>ste_table;
+</span><span>    </span><span style=color:#b8b6b1>/* ...and lots of metadata fields */
+</span><span>} PySTEntryObject;
+</span><span>
+</span><span style=color:#017c9d>struct </span><span>symtable {
+</span><span>    </span><span style=color:#017c9d>struct </span><span>_symtable_entry *st_cur;  </span><span style=color:#b8b6b1>// current symbol table entry
+</span><span>    </span><span style=color:#017c9d>struct </span><span>_symtable_entry *st_top;  </span><span style=color:#b8b6b1>// symbol table entry for module
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>st_global;             </span><span style=color:#b8b6b1>// borrowed ref to st_top->ste_symbols
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>st_private;            </span><span style=color:#b8b6b1>// name of current class or NULL
+</span><span>
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>st_blocks;  </span><span style=color:#b8b6b1>// dict: map AST node address to symbol table entry
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>st_stack;   </span><span style=color:#b8b6b1>// list: stack of namespace info
+</span><span>
+</span><span>    PyFutureFeatures </span><span style=color:#017c9d>*</span><span>st_future;  </span><span style=color:#b8b6b1>// module's future that affect the table
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>};
+</span></code></pre><p>The entrypoint for building symbol tables is <code>_PySymtable_Build</code>, and the following helper functions are defined:<ul><li><code>symtable_enter_block</code>, <code>symtable_exit_block</code>: enter/exit the scope.<li><code>symtable_add_def</code>, <code>symtable_lookup</code>: add/find a symbol in the current symbol table.<li><code>symtable_record_directive</code>: record the additional information for the nonlocal/global identifiers.</ul><pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>struct</span><span> symtable</span><span style=color:#017c9d>*
+</span><span style=color:#15b8ae>_PySymtable_Build</span><span>(mod_ty </span><span style=font-style:italic;color:#414f5c>mod</span><span>, PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>filename</span><span>, PyFutureFeatures </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>future</span><span>) {
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* make the initial symbol table */
+</span><span>    </span><span style=color:#017c9d>struct</span><span> symtable </span><span style=color:#017c9d>*</span><span>st </span><span style=color:#017c9d>= </span><span>symtable_new();
+</span><span>    </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>GET_IDENTIFIER(top) </span><span style=color:#017c9d>||
+</span><span>        </span><span style=color:#017c9d>!</span><span>symtable_enter_block(st, top, ModuleBlock, (</span><span style=color:#017c9d>void *</span><span>)mod, </span><span style=color:#15b8ae>0</span><span>, </span><span style=color:#15b8ae>0</span><span>, </span><span style=color:#15b8ae>0</span><span>, </span><span style=color:#15b8ae>0</span><span>)) {
+</span><span>        _PySymtable_Free(st);
+</span><span>        </span><span style=color:#017c9d>return </span><span style=color:#019d76>NULL</span><span>;
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* fill the symbol table with definitions */
+</span><span>    st->st_top </span><span style=color:#017c9d>=</span><span> st->st_cur;
+</span><span>    </span><span style=color:#017c9d>switch </span><span>(mod->kind) { </span><span style=color:#b8b6b1>/* ... */ </span><span>}  </span><span style=color:#b8b6b1>// visit nodes
+</span><span>
+</span><span>    </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>symtable_exit_block(st)) {
+</span><span>        _PySymtable_Free(st);
+</span><span>        </span><span style=color:#017c9d>return </span><span style=color:#019d76>NULL</span><span>;
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>
+</span><span>    </span><span style=color:#017c9d>if </span><span>(symtable_analyze(st)) </span><span style=color:#017c9d>return</span><span> st;  </span><span style=color:#b8b6b1>// phase 2
+</span><span>    _PySymtable_Free(st);
+</span><span>    </span><span style=color:#017c9d>return </span><span style=color:#019d76>NULL</span><span>;
+</span><span>
+</span><span> error:
+</span><span>    (</span><span style=color:#017c9d>void</span><span>) symtable_exit_block(st);
+</span><span>    _PySymtable_Free(st);
+</span><span>    </span><span style=color:#017c9d>return </span><span style=color:#019d76>NULL</span><span>;
+</span><span>}
+</span></code></pre><ul><li><code>analyze_block</code>: call <code>analyze_name</code> on all symbols, recursively analyze child blocks, update the results in the symbol table via <code>update_symbols</code>, and update the set of free variables.<li><code>analyze_name</code>: decide the correct scope of names.<li><code>analyze_cells</code>: if a name is both defined as free and local, then this block provides the bindings for the free variable. So, <code>analyze_cells</code> mark these names as <em>cell</em> and remove from the set of free variables.</ul><pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#019d76>static </span><span style=color:#017c9d>int </span><span style=color:#15b8ae>symtable_analyze</span><span>(</span><span style=color:#017c9d>struct</span><span> symtable </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>st</span><span>) {
+</span><span>    PyObject</span><span style=color:#017c9d>*</span><span> free </span><span style=color:#017c9d>= </span><span>PySet_New(</span><span style=color:#019d76>NULL</span><span>);
+</span><span>    PyObject</span><span style=color:#017c9d>*</span><span> global </span><span style=color:#017c9d>= </span><span>PySet_New(</span><span style=color:#019d76>NULL</span><span>);
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>
+</span><span>    </span><span style=color:#017c9d>int</span><span> r </span><span style=color:#017c9d>= </span><span>analyze_block(st->st_top, </span><span style=color:#019d76>NULL</span><span>, free, global);
+</span><span>    Py_DECREF(free); Py_DECREF(global);
+</span><span>    </span><span style=color:#017c9d>return</span><span> r;
+</span><span>}
+</span><span>
+</span><span style=color:#019d76>static </span><span style=color:#017c9d>int </span><span style=color:#15b8ae>analyze_block</span><span>(PySTEntryObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>ste</span><span>, PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>bound</span><span>, PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>free</span><span>,
+</span><span>                         PyObject </span><span style=color:#017c9d>*</span><span style=font-style:italic;color:#414f5c>global</span><span>) {
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>name, </span><span style=color:#017c9d>*</span><span>v, </span><span style=color:#017c9d>*</span><span>local </span><span style=color:#017c9d>= </span><span style=color:#019d76>NULL</span><span>, </span><span style=color:#017c9d>*</span><span>scopes </span><span style=color:#017c9d>= </span><span style=color:#019d76>NULL</span><span>, </span><span style=color:#017c9d>*</span><span>newbound </span><span style=color:#017c9d>= </span><span style=color:#019d76>NULL</span><span>;
+</span><span>    PyObject </span><span style=color:#017c9d>*</span><span>newglobal </span><span style=color:#017c9d>= </span><span style=color:#019d76>NULL</span><span>, </span><span style=color:#017c9d>*</span><span>newfree </span><span style=color:#017c9d>= </span><span style=color:#019d76>NULL</span><span>, </span><span style=color:#017c9d>*</span><span>allfree </span><span style=color:#017c9d>= </span><span style=color:#019d76>NULL</span><span>;
+</span><span>    </span><span style=color:#b8b6b1>/* initialize... */
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// populate the global and bound sets to be passed to children
+</span><span>    </span><span style=color:#017c9d>if </span><span>(ste->ste_type </span><span style=color:#017c9d>==</span><span> ClassBlock) {
+</span><span>        PyNumber_InPlaceOr(newglobal, global);
+</span><span>        </span><span style=color:#017c9d>if </span><span>(bound) PyNumber_InPlaceOr(newbound, bound);
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// analyze all names
+</span><span>    </span><span style=color:#017c9d>while </span><span>(PyDict_Next(ste->ste_symbols, </span><span style=color:#017c9d>&</span><span>pos, </span><span style=color:#017c9d>&</span><span>name, </span><span style=color:#017c9d>&</span><span>v)) {
+</span><span>        </span><span style=color:#017c9d>long</span><span> flags </span><span style=color:#017c9d>= </span><span>PyLong_AS_LONG(v);
+</span><span>        </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>analyze_name(ste, scopes, name, flags,
+</span><span>                          bound, local, free, global))
+</span><span>            </span><span style=color:#017c9d>goto</span><span> error;
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// populate global and bound sets to be passed to children
+</span><span>    </span><span style=color:#017c9d>if </span><span>(ste->ste_type </span><span style=color:#017c9d>!=</span><span> ClassBlock) {
+</span><span>        </span><span style=color:#017c9d>if </span><span>(ste->ste_type </span><span style=color:#017c9d>==</span><span> FunctionBlock) PyNumber_InPlaceOr(newbound,local);
+</span><span>        </span><span style=color:#017c9d>if </span><span>(bound) PyNumber_InPlaceOr(newbound, bound)
+</span><span>        PyNumber_InPlaceOr(newglobal, global);
+</span><span>    } </span><span style=color:#017c9d>else </span><span>{
+</span><span>        </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>GET_IDENTIFIER(__class__)) </span><span style=color:#017c9d>goto</span><span> error;  </span><span style=color:#b8b6b1>// special-case __class__
+</span><span>        </span><span style=color:#017c9d>if </span><span>(PySet_Add(newbound, __class__) </span><span style=color:#017c9d>< </span><span style=color:#15b8ae>0</span><span>) </span><span style=color:#017c9d>goto</span><span> error;
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// recursively analyze child blocks
+</span><span>    </span><span style=color:#017c9d>for </span><span>(i </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>0</span><span>; i </span><span style=color:#017c9d>< </span><span>PyList_GET_SIZE(ste->ste_children); </span><span style=color:#017c9d>++</span><span>i) {
+</span><span>        PyObject </span><span style=color:#017c9d>*</span><span>c </span><span style=color:#017c9d>= </span><span>PyList_GET_ITEM(ste->ste_children, i);
+</span><span>        PySTEntryObject</span><span style=color:#017c9d>*</span><span> entry </span><span style=color:#017c9d>= </span><span>(PySTEntryObject</span><span style=color:#017c9d>*</span><span>)c;
+</span><span>        </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>analyze_child_block(entry, newbound, newfree, newglobal, allfree))
+</span><span>            </span><span style=color:#017c9d>goto</span><span> error;
+</span><span>        </span><span style=color:#017c9d>if </span><span>(entry->ste_free </span><span style=color:#017c9d>||</span><span> entry->ste_child_free) ste->ste_child_free </span><span style=color:#017c9d>= </span><span style=color:#15b8ae>1</span><span>;
+</span><span>    }
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// update the free variable set
+</span><span>    PyNumber_InPlaceOr(newfree, allfree);
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// Check if any local variables must be converted to cell variables
+</span><span>    </span><span style=color:#017c9d>if </span><span>(ste->ste_type </span><span style=color:#017c9d>==</span><span> FunctionBlock </span><span style=color:#017c9d>&& !</span><span>analyze_cells(scopes, newfree))
+</span><span>        </span><span style=color:#017c9d>goto</span><span> error;
+</span><span>    </span><span style=color:#017c9d>else if </span><span>(ste->ste_type </span><span style=color:#017c9d>==</span><span> ClassBlock </span><span style=color:#017c9d>&& !</span><span>drop_class_free(ste, newfree))
+</span><span>        </span><span style=color:#017c9d>goto</span><span> error;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// records the results of the analysis in the symbol table entry
+</span><span>    </span><span style=color:#017c9d>if </span><span>(</span><span style=color:#017c9d>!</span><span>update_symbols(ste->ste_symbols, scopes, bound, newfree,
+</span><span>                        ste->ste_type </span><span style=color:#017c9d>==</span><span> ClassBlock))
+</span><span>        </span><span style=color:#017c9d>goto</span><span> error;
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>// update the free variable set
+</span><span>    PyNumber_InPlaceOr(free, newfree);
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>}
+</span></code></pre><h2 id=ir-generation>IR Generation</h2><p>After building the symbol tables, we can now generate blocks of CFG from the AST and the memory locations. CFG generation is similar to AST parsing; the compiler walks through the AST nodes and applies the conversion rules (named <code>compiler_visit_xxx</code>) for each AST node. The definition of the CFG block is located in <code>Python/compiler.c</code>:<pre class=language-c data-lang=c style=background:#fff;color:#414f5c><code class=language-c data-lang=c><span style=color:#017c9d>typedef struct</span><span> basicblock_ {
+</span><span>    </span><span style=color:#017c9d>struct</span><span> basicblock_ </span><span style=color:#017c9d>*</span><span>b_list;  </span><span style=color:#b8b6b1>// next basicblock located in the linked list
+</span><span>
+</span><span>    </span><span style=color:#017c9d>struct</span><span> instr </span><span style=color:#017c9d>*</span><span>b_instr;  </span><span style=color:#b8b6b1>// instruction array
+</span><span>    </span><span style=color:#017c9d>int</span><span> b_ialloc;           </span><span style=color:#b8b6b1>// length of instruction array
+</span><span>    </span><span style=color:#017c9d>int</span><span> b_iused;            </span><span style=color:#b8b6b1>// # of instructions used
+</span><span>
+</span><span>    </span><span style=color:#017c9d>int</span><span> b_startdepth;    </span><span style=color:#b8b6b1>// depth of stack upon entry of block
+</span><span>    </span><span style=color:#017c9d>int</span><span> b_offset;        </span><span style=color:#b8b6b1>// instruction offset
+</span><span>    </span><span style=color:#017c9d>int</span><span> b_predecessors;  </span><span style=color:#b8b6b1>// # predecssors that a block has
+</span><span>
+</span><span>    </span><span style=color:#017c9d>struct</span><span> basicblock_ </span><span style=color:#017c9d>*</span><span>b_next;  </span><span style=color:#b8b6b1>// next block reached by normal control flow
+</span><span>
+</span><span>    </span><span style=color:#b8b6b1>/* ... */
+</span><span>} basicblock;
+</span></code></pre><p>One can find the list of available opcodes in <code>Include/opcode.h</code>, and the gentle details are available at the <a href=https://docs.python.org/3/library/dis.html><code>dis</code> module manual</a>.<p>The basic blocks are merged and optimized by calling <code>assemble</code> function, which will be covered in the next post.<h2 id=reference>Reference</h2><ul><li>Alfred V. Aho and others, <em>Compilers: Principles, Techniques, and Tools</em> (2/E).<li>Python Software Foundation, <a href=https://devguide.python.org/compiler>Design of CPython's Compiler</a><li>Python Software Foundation, <a href=https://docs.python.org/3/reference/executionmodel.html>Execution Model</a>.</ul></div></div><div class="columns is-variable is-8-widescreen"><article class="giscus column"></article></div></article></section><footer class="footer mt-auto"><div class="container is-max-widescreen"><div class="image is-96x96 ml-auto mr-auto"><img alt="ascii kitten" src=/nyan.svg></div><div class="has-text-centered is-size-7"><small> © <a rel="author external" href=https://github.com/raifthenerd/raifthenerd>Seokjin Han</a> 2022. All contents on this website is licensed under <a rel="license external" href=https://creativecommons.org/licenses/by-sa/4.0/>CC BY-SA 4.0</a>. <br> <a href=/policy rel=license>Privacy Policy</a> </small></div></div></footer>
