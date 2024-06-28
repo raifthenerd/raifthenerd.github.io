@@ -1,0 +1,81 @@
+$vox1: #3e5c69;
+$vox2: #6793a6;
+$vox3: #182429;
+$vox4: #0570b0;
+$vox5: #3690c0;
+$vox6: #74a9cf;
+$vox7: #a6bddb;
+$vox8: #e2ddf2;
+
+$boxuk-fg: #414f5c;
+$boxuk-bg: #ffffff;
+
+$magenta: #d33682;
+$blue: $vox4;
+
+@use "../../node_modules/bulma/sass/utilities" with (
+  $family-sans-serif: "'Inter', 'Gothic A1', sans-serif",
+  $family-monospace: "'JetBrains Mono', monospace",
+  $primary: $blue,
+  $grey-darker: $boxuk-fg,
+  $grey-dark: $vox1,
+  $grey: $vox2,
+);
+@use "../../node_modules/bulma/sass/utilities/css-variables" as cv;
+@use "../../node_modules/bulma/sass/themes/light";
+@use "../../node_modules/bulma/sass/themes/setup";
+
+:root {
+  @include light.light-theme;
+  @include setup.setup-theme;
+  @include cv.register-vars(
+    (
+      "link-text": $magenta,
+      "code": $magenta,
+      "code-background": $boxuk-bg,
+    )
+  );
+}
+
+$pre-font-size: 0.85em;
+$footer-padding: 1.0rem 1.5rem 1.5rem;
+$menu-nested-list-margin: 0.25em 0.75em;
+$menu-nested-list-padding-left: 0.25em;
+
+@import "../../node_modules/bulma/sass/base";
+@import "../../node_modules/bulma/sass/components/menu.scss";
+@import "../../node_modules/bulma/sass/components/navbar.scss";
+@import "../../node_modules/bulma/sass/elements/content.scss";
+@import "../../node_modules/bulma/sass/elements/image.scss";
+@import "../../node_modules/bulma/sass/elements/title.scss";
+@import "../../node_modules/bulma/sass/grid";
+@import "../../node_modules/bulma/sass/layout/container.scss";
+@import "../../node_modules/bulma/sass/layout/footer.scss";
+@import "../../node_modules/bulma/sass/layout/hero.scss";
+@import "../../node_modules/bulma/sass/layout/section.scss";
+@import "../../node_modules/bulma/sass/helpers";
+
+@import "fonts/inter/index.css";
+@import "fonts/gothic-a1/index.css";
+@import "fonts/jetbrains-mono/index.css";
+
+// sticky footer
+html,body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a:hover {
+  color: $blue;
+}
+.title:not(.is-spaced):has(+ .subtitle) {
+  margin-bottom: 0.5rem;
+}
+.subtitle:not(.is-spaced):has(+ .title) {
+  margin-bottom: 0.5rem;
+}
+
+.katex {
+  font-size: 1.15em;
+}
